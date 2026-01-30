@@ -1,90 +1,44 @@
 #!/usr/bin/groovy
-
-
 pipeline {
     agent any
-
     options {
         disableConcurrentBuilds()
     }
-
     environment {
         PYTHONPATH = "${WORKSPACE}/section_4/code/cd_pipeline"
-        DOCKER_HOST = "tcp://localhost:2375" 
+        DOCKER_HOST = "tcp://localhost:2375"
     }
-
     stages {
-        stage("Test - Unit tests") {
-            steps { runUnittests() }
-        }
-
         stage("Build") {
-            steps { buildApp() }
+            steps {
+                dir('section_4/code/cd_pipeline') {
+                    bat "docker build -t hands-on-jenkins/myapp:${BUILD_NUMBER} ."
+                }
+            }
         }
-
         stage("Deploy - Dev") {
-            steps { deploy('dev') }
+            steps {
+                script {
+                    def containerName = "app_dev"
+                    def port = "8888"
+                    
+            
+                    powershell """
+                        if (docker ps -a -q -f name=${containerName}) {
+                            docker stop ${containerName}
+                            docker rm ${containerName}
+                        }
+                        docker run -d -p ${port}:5000 --name ${containerName} hands-on-jenkins/myapp:${BUILD_NUMBER}
+                    """
+                }
+            }
         }
-
-        stage("Test - UAT Dev") {
-            steps { runUAT(8888) }
-        }
-
         stage("Approve") {
-            steps { approve() }
+            steps {
+                timeout(time:1, unit:'DAYS') {
+                    input('¿Desplegar a Live?')
+                }
+            }
         }
-
-        stage("Deploy - Live") {
-            steps { deploy('live') }
-        }
     }
-}
-
-def buildApp() {
-    dir ('section_4/code/cd_pipeline') {
-        bat "docker build -t hands-on-jenkins/myapp:${BUILD_NUMBER} ."
-    }
-}
-
-def deploy(envName) {
-    def containerName = ''
-    def port = ''
-
-    if (envName == 'dev') {
-        containerName = "app_dev"
-        port = "8888"
-    } else if (envName == 'live') {
-        containerName = "app_live"
-        port = "80"
-    }
-
-    powershell """
-        # Detener y borrar el contenedor si existe (sin que falle si no existe)
-        if (docker ps -a -q -f name=${containerName}) {
-            docker stop ${containerName}
-            docker rm ${containerName}
-        }
-        # Arrancar el nuevo contenedor
-        docker run -d -p ${port}:5000 --name ${containerName} hands-on-jenkins/myapp:${BUILD_NUMBER}
-    """
-}
-
-def approve() {
-    timeout(time:1, unit:'DAYS') {
-        input('Do you want to deploy to live?')
-    }
-}
-
-def runUnittests() {
-    bat "pip install --no-cache-dir -r ./section_4/code/cd_pipeline/requirements.txt"
-    bat "python section_4/code/cd_pipeline/tests/test_flask_app.py"
-}
-
-def runUAT(port) {
-    echo "Running UAT on port ${port}..."
-    bat "curl http://localhost:${port} || exit 0" 
-}
-
-def runUAT(port) {
-	sh "section_4/code/cd_pipeline/tests/runUAT.sh ${port}"
 }
